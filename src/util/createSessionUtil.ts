@@ -40,8 +40,9 @@ export default class CreateSessionUtil {
     session: string,
     res?: any
   ) {
+    let client = this.getClient(session) as any;
+    const attemptRef = client;
     try {
-      let client = this.getClient(session) as any;
       if (client.status != null && client.status !== 'CLOSED') return;
       client.status = 'INITIALIZING';
       client.config = req.body;
@@ -112,8 +113,9 @@ export default class CreateSessionUtil {
                   statusFind
                 );
                 if (
-                  statusFind === StatusFind.autocloseCalled ||
-                  statusFind === StatusFind.disconnectedMobile
+                  (statusFind === StatusFind.autocloseCalled ||
+                    statusFind === StatusFind.disconnectedMobile) &&
+                  clientsArray[session] === client
                 ) {
                   client.status = 'CLOSED';
                   client.qrcode = null;
@@ -131,6 +133,10 @@ export default class CreateSessionUtil {
         )
       );
 
+      if (clientsArray[session] !== attemptRef) {
+        wppClient.close().catch(() => {});
+        return;
+      }
       client = clientsArray[session] = Object.assign(wppClient, client);
       await this.start(req, client);
 
@@ -154,9 +160,8 @@ export default class CreateSessionUtil {
       }
     } catch (e) {
       req.logger.error(e);
-      if (e instanceof Error && e.name == 'TimeoutError') {
-        const client = this.getClient(session) as any;
-        client.status = 'CLOSED';
+      if (clientsArray[session] === attemptRef) {
+        attemptRef.status = 'CLOSED';
       }
     }
   }

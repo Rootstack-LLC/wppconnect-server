@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 import CreateSessionUtil from '../../util/createSessionUtil';
+import { clientsArray } from '../../util/sessionUtil';
+import { create as mockCreate } from '@wppconnect-team/wppconnect';
 
 jest.mock('@wppconnect-team/wppconnect', () => ({
   create: jest.fn(),
@@ -30,7 +32,12 @@ jest.mock('../../util/functions', () => ({
 }));
 jest.mock('../../util/tokenStore/factory', () => ({
   __esModule: true,
-  default: jest.fn(),
+  default: jest.fn().mockImplementation(() => ({
+    createTokenStory: () => ({
+      getToken: jest.fn().mockResolvedValue({}),
+      setToken: jest.fn(),
+    }),
+  })),
 }));
 
 describe('CreateSessionUtil optional webhook listeners', function () {
@@ -84,4 +91,110 @@ describe('CreateSessionUtil optional webhook listeners', function () {
       expect(client[listener]).toHaveBeenCalledTimes(1);
     }
   );
+});
+
+describe('CreateSessionUtil initialization failure recovery', function () {
+  function makeReq(overrides: any = {}) {
+    return {
+      body: {},
+      logger: { error: jest.fn(), info: jest.fn() },
+      serverOptions: {
+        createOptions: {},
+        webhook: {},
+      },
+      io: { emit: jest.fn() },
+      ...overrides,
+    };
+  }
+
+  afterEach(() => {
+    for (const key of Object.keys(clientsArray)) {
+      delete (clientsArray as any)[key];
+    }
+    jest.clearAllMocks();
+  });
+
+  it('resets a session stuck in INITIALIZING to CLOSED after a TimeoutError', async () => {
+    const util = new CreateSessionUtil();
+    const error = new Error('timed out');
+    error.name = 'TimeoutError';
+    (mockCreate as jest.Mock).mockRejectedValue(error);
+
+    await util.createSessionUtil(makeReq(), clientsArray, 'session-a');
+
+    expect((clientsArray as any)['session-a'].status).toBe('CLOSED');
+  });
+
+  it('also resets to CLOSED after a plain, generic Error — not just TimeoutError', async () => {
+    const util = new CreateSessionUtil();
+    (mockCreate as jest.Mock).mockRejectedValue(new Error('browser crashed'));
+
+    await util.createSessionUtil(makeReq(), clientsArray, 'session-b');
+
+    expect((clientsArray as any)['session-b'].status).toBe('CLOSED');
+  });
+
+  it('also resets to CLOSED when the rejection is not an Error instance at all', async () => {
+    const util = new CreateSessionUtil();
+    (mockCreate as jest.Mock).mockRejectedValue('plain string rejection');
+
+    await util.createSessionUtil(makeReq(), clientsArray, 'session-c');
+
+    expect((clientsArray as any)['session-c'].status).toBe('CLOSED');
+  });
+
+  it('a retry with the same sessionId succeeds once the prior attempt is CLOSED', async () => {
+    const util = new CreateSessionUtil();
+    (mockCreate as jest.Mock).mockRejectedValueOnce(new Error('first attempt fails'));
+    await util.createSessionUtil(makeReq(), clientsArray, 'session-retry');
+    expect((clientsArray as any)['session-retry'].status).toBe('CLOSED');
+
+    const secondClient = { close: jest.fn().mockResolvedValue(undefined) };
+    (mockCreate as jest.Mock).mockResolvedValueOnce(secondClient);
+    await util.createSessionUtil(makeReq(), clientsArray, 'session-retry');
+
+    expect((clientsArray as any)['session-retry']).toBe(secondClient);
+  });
+
+  it('two different sessionIds never affect each other', async () => {
+    const util = new CreateSessionUtil();
+    const clientY = { close: jest.fn().mockResolvedValue(undefined) };
+    (mockCreate as jest.Mock).mockImplementation((config: any) => {
+      if (config.session === 'session-x') {
+        return Promise.reject(new Error('session-x fails'));
+      }
+      return Promise.resolve(clientY);
+    });
+
+    await Promise.all([
+      util.createSessionUtil(makeReq(), clientsArray, 'session-x'),
+      util.createSessionUtil(makeReq(), clientsArray, 'session-y'),
+    ]);
+
+    expect((clientsArray as any)['session-x'].status).toBe('CLOSED');
+    expect((clientsArray as any)['session-y']).toBe(clientY);
+  });
+
+  it('a late resolution from an abandoned attempt never clobbers a session already superseded by close-session', async () => {
+    const util = new CreateSessionUtil();
+    let resolveCreate: (value: any) => void;
+    (mockCreate as jest.Mock).mockReturnValue(
+      new Promise(resolve => {
+        resolveCreate = resolve;
+      })
+    );
+
+    const pending = util.createSessionUtil(makeReq(), clientsArray, 'session-stale');
+    expect((clientsArray as any)['session-stale'].status).toBe('INITIALIZING');
+
+    (clientsArray as any)['session-stale'] = { status: null, session: 'session-stale' };
+
+    const staleClient = { close: jest.fn().mockResolvedValue(undefined) };
+    resolveCreate!(staleClient);
+    await pending;
+
+    expect((clientsArray as any)['session-stale'].status).toBeNull();
+    expect((clientsArray as any)['session-stale']).not.toBe(staleClient);
+    expect(staleClient.close).toHaveBeenCalledTimes(1);
+  });
 });

@@ -5943,7 +5943,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@wppconnect-team/wppconnect@npm:^2.3.4":
+"@wppconnect-team/wppconnect@npm:2.3.4":
   version: 2.3.4
   resolution: "@wppconnect-team/wppconnect@npm:2.3.4"
   dependencies:
@@ -5985,6 +5985,48 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@wppconnect-team/wppconnect@patch:@wppconnect-team/wppconnect@npm%3A2.3.4#~/.yarn/patches/@wppconnect-team-wppconnect-npm-2.3.4-5f1838abe9.patch":
+  version: 2.3.4
+  resolution: "@wppconnect-team/wppconnect@patch:@wppconnect-team/wppconnect@npm%3A2.3.4#~/.yarn/patches/@wppconnect-team-wppconnect-npm-2.3.4-5f1838abe9.patch::version=2.3.4&hash=88c405"
+  dependencies:
+    "@img/sharp-win32-x64": "npm:^0.35.4"
+    "@wppconnect/wa-js": "npm:^4.6.1"
+    "@wppconnect/wa-version": "npm:^1.5.4472"
+    atob: "npm:^2.1.2"
+    axios: "npm:^1.20.0"
+    boxen: "npm:^5.1.2"
+    catch-exit: "npm:^2.0.0"
+    chalk: "npm:~4.1.2"
+    chrome-launcher: "npm:^0.15.2"
+    execa: "npm:^5.1.1"
+    fsevents: "npm:^2.3.3"
+    futoin-hkdf: "npm:^1.5.3"
+    logform: "npm:^2.7.0"
+    lookpath: "npm:^1.2.3"
+    mime-types: "npm:^3.0.2"
+    puppeteer: "npm:^24.43.1"
+    puppeteer-extra: "npm:^3.3.6"
+    puppeteer-extra-plugin-stealth: "npm:^2.11.2"
+    puppeteer-extra-plugin-user-data-dir: "npm:^2.4.1"
+    puppeteer-extra-plugin-user-preferences: "npm:^2.4.1"
+    qrcode-terminal: "npm:^0.12.0"
+    reflect-metadata: "npm:^0.2.1"
+    rimraf: "npm:^3.0.2"
+    sanitize-filename: "npm:^1.6.4"
+    sharp: "npm:0.35.4"
+    tmp: "npm:^0.2.7"
+    tree-kill: "npm:^1.2.2"
+    winston: "npm:^3.19.0"
+    ws: "npm:^8.21.3"
+  dependenciesMeta:
+    "@img/sharp-win32-x64":
+      optional: true
+    fsevents:
+      optional: true
+  checksum: 10c0/c005028c2dded6c46e79f9fab1a8f31ce06361e5476ced2d313a6d9b01bc086562faa3e316b7c805c648c5c9e94379119a99aaca9325c79bd05c5af26a5b90e4
+  languageName: node
+  linkType: hard
+
 "@wppconnect/server@workspace:.":
   version: 0.0.0-use.local
   resolution: "@wppconnect/server@workspace:."
@@ -6016,7 +6058,7 @@ __metadata:
     "@types/unzipper": "npm:^0.10.11"
     "@typescript-eslint/eslint-plugin": "npm:^7.18.0"
     "@typescript-eslint/parser": "npm:^8.57.2"
-    "@wppconnect-team/wppconnect": "npm:^2.3.4"
+    "@wppconnect-team/wppconnect": "patch:@wppconnect-team/wppconnect@npm%3A2.3.4#~/.yarn/patches/@wppconnect-team-wppconnect-npm-2.3.4-5f1838abe9.patch"
     archiver: "npm:^7.0.1"
     axios: "npm:^1.20.0"
     bcrypt: "npm:^6.0.0"

@@ -1,0 +1,13 @@
+diff --git a/dist/api/layers/host.layer.js b/dist/api/layers/host.layer.js
+index 8a39d41f1493ce651bd16ce097e760fc61322c24..1d9ac76a30d1a9b587b96de563e2d1ca56986a15 100644
+--- a/dist/api/layers/host.layer.js
++++ b/dist/api/layers/host.layer.js
+@@ -297,7 +297,7 @@ class HostLayer {
+             }
+             await pageLoad;
+             if (pageLoad === this.pageLoadPromise && this.isInjected) {
+-                await this.page.waitForFunction(() => WPP.isReady);
++                await this.page.waitForFunction(() => WPP.isReady, { timeout: 120000 });
+                 return;
+             }
+         }

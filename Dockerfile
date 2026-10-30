@@ -50,12 +50,17 @@ WORKDIR /usr/src/wpp-server/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Install runtime dependencies (chromium and vips libraries)
+# Install runtime dependencies (chromium and vips libraries).
+# util-linux provides the full `flock(1)` binary sessionProfileLock.ts
+# depends on for cross-task EFS coordination — busybox's own flock applet
+# is not guaranteed present/complete on every Alpine base, so this is
+# installed explicitly rather than assumed.
 RUN apk add --no-cache \
     chromium \
     ffmpeg \
     vips \
-    fftw && \
+    fftw \
+    util-linux && \
     ffmpeg -hide_banner -loglevel error \
       -f lavfi -i anullsrc=r=48000:cl=mono \
       -t 1 -c:a pcm_s16le /usr/src/wpp-server/silence.wav

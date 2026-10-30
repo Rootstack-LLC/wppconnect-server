@@ -16,15 +16,27 @@
 
 // The runtime registry and this admission gate belong to the same server process.
 let maintenanceActive = false;
+let shuttingDown = false;
 const starting = new Set<Promise<void>>();
 
 export function isSessionMaintenanceActive(): boolean {
   return maintenanceActive;
 }
 
+export function isShuttingDown(): boolean {
+  return shuttingDown;
+}
+
+/** Marks the process as shutting down, so no further session starts are
+ * admitted while in-flight sessions are drained (see shutdownManager). There
+ * is no undo — a process only shuts down once. */
+export function beginShutdown(): void {
+  shuttingDown = true;
+}
+
 /** Admit a start synchronously, before any token or browser work can begin. */
 export function tryBeginSessionStart(): (() => void) | undefined {
-  if (maintenanceActive) return;
+  if (maintenanceActive || shuttingDown) return;
   let done!: () => void;
   const pending = new Promise<void>((resolve) => (done = resolve));
   starting.add(pending);

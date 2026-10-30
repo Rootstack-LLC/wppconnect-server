@@ -27,6 +27,7 @@ import config from '../config';
 import { startAllSessions } from './functions';
 import getAllTokens from './getAllTokens';
 import { acquireSessionMaintenance } from './sessionMaintenance';
+import { releaseProfileLockForSession } from './sessionProfileLock';
 import { cleanupSession, clientsArray } from './sessionUtil';
 
 async function writeBackupArchive(directory: string): Promise<string> {
@@ -167,6 +168,10 @@ export async function closeAllSessions(req: Request) {
           logger.info('Stopping session: ' + session);
           await client.page.browser().close();
         }
+        // Without this, backup/restore closes Chromium but leaves the real
+        // flock held — the next start for this session would be refused
+        // forever, since nothing ever killed the lock-holding process.
+        await releaseProfileLockForSession(session);
       });
     } catch (error) {
       // cleanupSession keeps the runtime or an ERROR reservation behind, so

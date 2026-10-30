@@ -30,6 +30,7 @@ import CreateSessionUtil from '../util/createSessionUtil';
 import { callWebHook, contactToArray } from '../util/functions';
 import getAllTokens from '../util/getAllTokens';
 import { isSessionMaintenanceActive } from '../util/sessionMaintenance';
+import { releaseProfileLockForSession } from '../util/sessionProfileLock';
 import { cleanupSession, clientsArray } from '../util/sessionUtil';
 
 const SessionUtil = new CreateSessionUtil();
@@ -314,6 +315,7 @@ export async function closeSession(req: Request, res: Response): Promise<any> {
         if (typeof client?.close === 'function') {
           await client.close();
         }
+        await releaseProfileLockForSession(session);
       });
       req.io.emit('whatsapp-status', false);
       callWebHook(client, req, 'closesession', {
@@ -368,6 +370,9 @@ export async function logOutSession(req: Request, res: Response): Promise<any> {
       if (typeof client?.logout === 'function') {
         await client.logout();
       }
+      // Stops our heartbeat before the directory below is removed; the lock
+      // file itself goes with the rest of the profile.
+      await releaseProfileLockForSession(session);
       await new Promise((resolve) => setTimeout(resolve, 500));
       const pathUserData = path.resolve(config.customUserDataDir, session);
       const pathTokens = path.resolve(

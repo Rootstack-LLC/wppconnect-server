@@ -13,7 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import config from '../../config';
 import CreateSessionUtil from '../../util/createSessionUtil';
+import {
+  acquireProfileLock,
+  lockFilePath,
+  parseLockInfo,
+  releaseAllProfileLocks,
+} from '../../util/sessionProfileLock';
 import { clientsArray } from '../../util/sessionUtil';
 
 jest.mock('@wppconnect-team/wppconnect', () => ({
@@ -322,5 +333,202 @@ describe('Community comment forwarding', () => {
     await expect(
       new CreateSessionUtil().onCommentMessage({} as any, {} as any)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('CreateSessionUtil profile lock integration (EFS-shared userDataDir)', () => {
+  let root: string;
+  const originalProfileLock = { ...config.profileLock };
+
+  function setup(customUserDataDir: string) {
+    const create = jest.requireMock('@wppconnect-team/wppconnect').create;
+    const Factory = jest.requireMock('../../util/tokenStore/factory').default;
+    Factory.mockImplementation(() => ({
+      createTokenStory: () => ({
+        getToken: jest.fn().mockResolvedValue({}),
+        setToken: jest.fn(),
+      }),
+    }));
+    const req = {
+      body: {},
+      serverOptions: { createOptions: {}, webhook: {}, customUserDataDir },
+      logger: { info: jest.fn(), error: jest.fn() },
+    };
+    const util = new CreateSessionUtil();
+    util.start = jest.fn().mockResolvedValue(undefined);
+    return { create, req, util };
+  }
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpp-createsession-lock-'));
+    config.profileLock.enable = true;
+    config.profileLock.heartbeatIntervalMs = 50;
+    config.profileLock.staleThresholdMs = 200;
+  });
+
+  afterEach(async () => {
+    delete (clientsArray as any).stale;
+    jest.clearAllMocks();
+    Object.assign(config.profileLock, originalProfileLock);
+    await releaseAllProfileLocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('never calls create() when another live process already holds the real profile lock', async () => {
+    const { create, req, util } = setup(root);
+    // A genuine held lock (real flock), not just a JSON file that looks
+    // occupied — proving the refusal comes from the kernel, not from
+    // reading stale-looking metadata.
+    const holder = await acquireProfileLock('stale', root, {
+      heartbeatIntervalMs: 60000,
+      acquireTimeoutMs: 2000,
+    });
+    expect(holder.acquired).toBe(true);
+    if (!holder.acquired) return;
+
+    await util.createSessionUtil(req, clientsArray, 'stale');
+
+    expect(create).not.toHaveBeenCalled();
+    expect((clientsArray as any).stale.status).toBe('ERROR');
+    expect(req.logger.error).toHaveBeenCalled();
+
+    await holder.release();
+  });
+
+  it('never calls create() even when the diagnostic heartbeat looks arbitrarily stale, as long as the real lock is still held', async () => {
+    const { create, req, util } = setup(root);
+    const holder = await acquireProfileLock('stale', root, {
+      // Never refreshes — the diagnostic file will look ancient by the
+      // time createSessionUtil checks it, which must not matter at all.
+      heartbeatIntervalMs: 60 * 60 * 1000,
+      acquireTimeoutMs: 2000,
+    });
+    expect(holder.acquired).toBe(true);
+    if (!holder.acquired) return;
+
+    await util.createSessionUtil(req, clientsArray, 'stale');
+
+    expect(create).not.toHaveBeenCalled();
+    expect((clientsArray as any).stale.status).toBe('ERROR');
+
+    await holder.release();
+  });
+
+  it('acquires the lock, launches Chromium, and releases the lock after a clean init failure', async () => {
+    const { create, req, util } = setup(root);
+    create.mockRejectedValue(new Error('Browser startup failed'));
+
+    await util.createSessionUtil(req, clientsArray, 'stale');
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect((clientsArray as any).stale.status).toBe('CLOSED');
+    expect(fs.existsSync(lockFilePath(root, 'stale'))).toBe(false);
+  });
+
+  it('keeps the lock held when the runtime close() itself fails, so no second Chromium can start', async () => {
+    const { create, req, util } = setup(root);
+    const runtime = {
+      close: jest.fn().mockRejectedValue(new Error('Browser close failed')),
+    };
+    create.mockResolvedValue(runtime);
+    util.start = jest
+      .fn()
+      .mockRejectedValue(new Error('Listener setup failed'));
+
+    await util.createSessionUtil(req, clientsArray, 'stale');
+
+    expect((clientsArray as any).stale.status).toBe('ERROR');
+    expect(fs.existsSync(lockFilePath(root, 'stale'))).toBe(true);
+
+    // A second attempt must not even try to launch a browser while the
+    // first attempt's lock (and its unclosed runtime) are still held.
+    await util.createSessionUtil(req, clientsArray, 'stale');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("proceeds normally once a crashed owner's real lock has actually been released, regardless of leftover diagnostic JSON", async () => {
+    const { create, req, util } = setup(root);
+    // Leftover diagnostic metadata from a process that's genuinely gone —
+    // no real flock behind it (nothing acquired one in this test).
+    const filePath = lockFilePath(root, 'stale');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        ownerId: 'crashed-task',
+        pid: 123456,
+        acquiredAt: Date.now() - 100000,
+        heartbeatAt: Date.now() - 100000,
+      })
+    );
+    const runtime = { close: jest.fn().mockResolvedValue(undefined) };
+    create.mockResolvedValue(runtime);
+
+    await util.createSessionUtil(req, clientsArray, 'stale');
+
+    expect(create).toHaveBeenCalledTimes(1);
+    // util.start() is mocked as a no-op above, so status stops advancing
+    // here rather than reaching CONNECTED — what this proves is that
+    // initialization was allowed to proceed at all (never refused/ERRORed
+    // just because the leftover JSON looked occupied).
+    expect((clientsArray as any).stale.status).toBe('INITIALIZING');
+  });
+
+  it('two concurrent createSessionUtil calls for different sessions each get their own lock', async () => {
+    const { create, req, util } = setup(root);
+    create.mockImplementation(async () => ({
+      close: jest.fn().mockResolvedValue(undefined),
+    }));
+
+    await Promise.all([
+      util.createSessionUtil(req, clientsArray, 'alpha'),
+      util.createSessionUtil(req, clientsArray, 'beta'),
+    ]);
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(fs.existsSync(lockFilePath(root, 'alpha'))).toBe(true);
+    expect(fs.existsSync(lockFilePath(root, 'beta'))).toBe(true);
+    delete (clientsArray as any).alpha;
+    delete (clientsArray as any).beta;
+  });
+
+  it('isolates the session (ERROR, best-effort close) when the real lock holder dies unexpectedly while the session is still live', async () => {
+    const { create, req, util } = setup(root);
+    const runtime = { close: jest.fn().mockResolvedValue(undefined) };
+    create.mockResolvedValue(runtime);
+
+    await util.createSessionUtil(req, clientsArray, 'stale');
+    expect((clientsArray as any).stale.status).toBe('INITIALIZING');
+
+    // Kill the REAL flock-holding process out from under the session —
+    // simulates it being OOM-killed, crashing, or killed externally,
+    // independent of anything this test or createSessionUtil did itself.
+    const lockInfo = parseLockInfo(
+      fs.readFileSync(lockFilePath(root, 'stale'), 'utf8')
+    );
+    expect(lockInfo).not.toBeNull();
+    process.kill(lockInfo!.pid, 'SIGKILL');
+
+    // No arbitrary settle guess: poll until the session is isolated or the
+    // deadline is hit.
+    const deadline = Date.now() + 3000;
+    while (
+      (clientsArray as any).stale.status !== 'ERROR' &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    expect((clientsArray as any).stale.status).toBe('ERROR');
+    expect(runtime.close).toHaveBeenCalledTimes(1);
+
+    // The lock is genuinely gone now too (not just the in-memory session
+    // state) — a brand new session can acquire it immediately.
+    const second = await acquireProfileLock('stale', root, {
+      heartbeatIntervalMs: 50,
+      acquireTimeoutMs: 2000,
+    });
+    expect(second.acquired).toBe(true);
+    if (second.acquired) await second.release();
   });
 });

@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   update-lock:
-    runs-on: ubuntu-latest
+    # Safe on self-hosted: only triggers on push to main (requires write
+    # access), never reachable from an external pull_request.
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v7

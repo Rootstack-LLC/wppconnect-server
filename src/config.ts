@@ -128,6 +128,26 @@ export default {
     cacheDuration: 5000,
     exposeSessionMetrics: true,
   },
+  profileLock: {
+    enable: env.PROFILE_LOCK_ENABLE !== 'false',
+    heartbeatIntervalMs: envNumber('PROFILE_LOCK_HEARTBEAT_MS', 15000),
+    // Diagnostic only (surfaces an old-looking heartbeat for a health check
+    // or log line) — acquireProfileLock never uses this to grant a reclaim;
+    // only a live flock(2) refusal/grant from the kernel decides that.
+    staleThresholdMs: envNumber('PROFILE_LOCK_STALE_MS', 45000),
+    // How long to wait for `flock(1)` to report in before treating the
+    // attempt as a hard failure (binary missing, shell hung) — not a
+    // reclaim window.
+    acquireTimeoutMs: envNumber('PROFILE_LOCK_ACQUIRE_TIMEOUT_MS', 5000),
+    // After Node dies without calling release(), the holder polls for a
+    // still-running Chromium against this profile for this many seconds
+    // before force-killing whatever it finds — only reached once Node is
+    // already gone and cannot run its own close()/treeKill fallback.
+    orphanKillAfterS: envNumber('PROFILE_LOCK_ORPHAN_KILL_AFTER_S', 10),
+  },
+  shutdown: {
+    timeoutMs: envNumber('SHUTDOWN_TIMEOUT_MS', 10000),
+  },
   db: {
     mongodbDatabase: env.MONGODB_DATABASE || 'tokens',
     mongodbCollection: env.MONGODB_COLLECTION || '',

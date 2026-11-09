@@ -18,6 +18,7 @@ import { Request } from 'express';
 import path from 'path';
 import QRCode from 'qrcode';
 
+import config from '../config';
 import { download } from '../controller/sessionController';
 import { EventDispatcher } from '../core/events/EventDispatcher';
 import { ProviderId } from '../core/provider/ProviderAdapter';
@@ -29,7 +30,8 @@ import { WhatsAppServer } from '../types/WhatsAppServer';
 import { deactivateCallMedia } from './callMediaUtil';
 import chatWootClient from './chatWootClient';
 import { autoDownload, callWebHook, startHelper } from './functions';
-import { tryBeginSessionStart } from './sessionMaintenance';
+import { isShuttingDown, tryBeginSessionStart } from './sessionMaintenance';
+import { acquireProfileLock } from './sessionProfileLock';
 import { clientsArray, eventEmitter } from './sessionUtil';
 import Factory from './tokenStore/factory';
 
@@ -55,11 +57,14 @@ export default class CreateSessionUtil {
     }
     const releaseStart = tryBeginSessionStart();
     if (!releaseStart) {
-      req.logger.info('Session start skipped: backup or restore in progress');
+      const reason = isShuttingDown()
+        ? 'the server is shutting down'
+        : 'backup or restore is in progress';
+      req.logger.info(`Session start skipped: ${reason}`);
       if (res && !res.headersSent && !res._headerSent) {
         res.status(503).json({
           status: false,
-          message: 'Session backup or restore is in progress. Try again later.',
+          message: `Session start unavailable: ${reason}. Try again later.`,
         });
       }
       return;
@@ -83,6 +88,7 @@ export default class CreateSessionUtil {
     // close or publish pairing data for the replacement.
     client = clientsArray[session] = { ...client };
     let initializedClient: typeof client;
+    let releaseProfile: (() => Promise<void>) | undefined;
     const ownsAttempt = () =>
       clientsArray[session] === client &&
       !['CLOSED', 'CLOSING', 'ERROR'].includes(client.status);
@@ -98,6 +104,58 @@ export default class CreateSessionUtil {
       if (providerFactory.isSocketProvider(requestedProvider)) {
         await this.createSocketSession(req, session, requestedProvider, client);
         return;
+      }
+
+      // Only the Chromium path shares a profile directory that another ECS
+      // task could reach over EFS — acquire ownership of it before ever
+      // touching the browser, so two processes never race to launch against
+      // the same userDataDir. Backed by a real kernel flock (see
+      // sessionProfileLock.ts), so this refuses outright — never a stale
+      // guess, never a retry storm — whenever another process genuinely
+      // still holds the profile.
+      if (req.serverOptions.customUserDataDir && config.profileLock.enable) {
+        const lockResult = await acquireProfileLock(
+          session,
+          req.serverOptions.customUserDataDir,
+          {
+            heartbeatIntervalMs: config.profileLock.heartbeatIntervalMs,
+            acquireTimeoutMs: config.profileLock.acquireTimeoutMs,
+            orphanKillAfterS: config.profileLock.orphanKillAfterS,
+            logger: req.logger,
+            // The lock holder died without us ever calling release() — this
+            // process no longer has any real coordination over the profile,
+            // even if Chromium itself is still up. Isolate rather than keep
+            // trusting a session nobody can safely vouch for: mark it ERROR
+            // (blocks new starts via the top-of-function status guard) and
+            // best-effort close whatever runtime is still reachable.
+            onUnexpectedLoss: () => {
+              const current = clientsArray[session] as any;
+              if (!current || ['CLOSED', 'CLOSING'].includes(current.status)) {
+                return;
+              }
+              current.status = 'ERROR';
+              sessionManager.delete(session);
+              deactivateCallMedia(session);
+              if (typeof current.close === 'function') {
+                Promise.resolve(current.close()).catch(() => {});
+              }
+            },
+          }
+        );
+        if (!lockResult.acquired) {
+          const heldBy =
+            lockResult.reason === 'locked'
+              ? ` (held by ${lockResult.heldBy?.ownerId})`
+              : '';
+          req.logger.error(
+            new Error(
+              `[${session}] Profile is in use by another process${heldBy}; refusing to start a second Chromium against it`
+            )
+          );
+          client.status = 'ERROR';
+          return;
+        }
+        releaseProfile = lockResult.release;
       }
 
       const tokenStore = new Factory();
@@ -219,6 +277,7 @@ export default class CreateSessionUtil {
       // or overwrite a newer initialization.
       if (!ownsAttempt()) {
         await wppClient.close();
+        if (releaseProfile) await releaseProfile();
         return;
       }
       client = clientsArray[session] = Object.assign(wppClient, client);
@@ -265,9 +324,17 @@ export default class CreateSessionUtil {
           if (initializedClient) await initializedClient.close();
           client.status = 'CLOSED';
           client.qrcode = null;
+          // Chromium is confirmed gone (or never came up) — safe to tell
+          // other processes this profile is free again.
+          if (releaseProfile) await releaseProfile();
         } catch (closeError) {
           // Keep the failed runtime available to explicit cleanup rather than
           // starting a second browser against a profile still owned by it.
+          // The profile lock deliberately stays held (heartbeat keeps
+          // running) until an explicit close/logout actually confirms
+          // Chromium is gone — releasing it here could let another process
+          // launch a second Chromium against a profile this one might still
+          // own.
           client.status = 'ERROR';
           req.logger.error(closeError);
         }

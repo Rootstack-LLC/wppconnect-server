@@ -22,6 +22,7 @@ import { logger } from '..';
 import config from '../config';
 import { getClient } from '../core/provider/useProvider';
 import { backupSessions, restoreSessions } from '../util/manageSession';
+import { releaseProfileLockForSession } from '../util/sessionProfileLock';
 import { cleanupSession } from '../util/sessionUtil';
 
 export async function backupAllSessions(req: Request, res: Response) {
@@ -175,6 +176,13 @@ export async function clearSessionData(req: Request, res: Response) {
       if (client?.page && typeof client.logout === 'function') {
         await client.logout();
       }
+      // Must run before the directory is removed below: deleting it while
+      // the lock-holding process still has the (now-unlinked) lock file
+      // open does not stop that process from existing, but a later
+      // acquire() against the freshly recreated path would lock a
+      // different inode entirely — two "locks" that never actually
+      // conflict with each other.
+      await releaseProfileLockForSession(leaf);
       const root = path.resolve(config.customUserDataDir);
       const pathUserData = path.resolve(root, leaf);
       if (path.dirname(pathUserData) !== root) {

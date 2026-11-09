@@ -60,6 +60,16 @@ export interface ServerOptions {
     cacheDuration: number;
     exposeSessionMetrics?: boolean;
   };
+  profileLock: {
+    enable: boolean;
+    heartbeatIntervalMs: number;
+    staleThresholdMs: number;
+    acquireTimeoutMs: number;
+    orphanKillAfterS: number;
+  };
+  shutdown: {
+    timeoutMs: number;
+  };
   db: {
     mongodbDatabase: string;
     mongodbCollection: string;

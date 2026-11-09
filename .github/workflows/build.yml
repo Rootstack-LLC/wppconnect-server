@@ -13,7 +13,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Runs after changes are merged (push to develop/main), not during PR
+    # review, per Susan's request. test/runtime-matrix/docker still run on
+    # pull_request per their own triggers/conditions — unchanged here.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
+    # Safe on self-hosted: the `if:` above already excludes pull_request
+    # entirely, so only push to develop/main (requires write access, not
+    # reachable from an external fork) ever reaches this job.
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -52,6 +59,18 @@ jobs:
         run: yarn test --runInBand
 
   lint:
+    # Temporarily disabled in CI at Susan's request. The `yarn lint` script
+    # and ESLint config/rules are untouched — only this job's execution is
+    # gated off. actionlint flags a bare `if: false` as a constant
+    # condition, so this uses an undefined-by-default repository variable
+    # instead: re-enable by setting LINT_ENABLED=true as a repo variable,
+    # or just delete this `if:` line.
+    if: vars.LINT_ENABLED == 'true'
+    # Intentionally kept on ubuntu-latest, not self-hosted: this job is
+    # still wired to the workflow-level `pull_request: '*'` trigger, so if
+    # LINT_ENABLED is ever flipped on, it would run for external fork PRs
+    # too. Do not move to self-hosted unless this job also gets its own
+    # push-only `if:` like `build` above.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -88,6 +107,10 @@ jobs:
         run: yarn lint
 
   test:
+    # Kept on ubuntu-latest: no job-level `if:` restricts this job, so it
+    # still runs on both push and pull_request (any branch, including
+    # external fork PRs on this public repo). Do not move to self-hosted
+    # without first adding a push-only guard like `build`'s above.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -131,6 +154,10 @@ jobs:
 
   runtime-matrix:
     if: github.event_name == 'pull_request' && (github.base_ref == 'develop' || github.base_ref == 'main')
+    # Must stay on ubuntu-latest: by design this job only ever runs on
+    # pull_request (its `if:` above has no push path at all), so on this
+    # public repo 100% of its executions are PR-triggered — including
+    # from external forks. Never move this one to self-hosted.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

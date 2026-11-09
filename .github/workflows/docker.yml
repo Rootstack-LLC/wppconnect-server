@@ -25,7 +25,13 @@ env:
 
 jobs:
   docker:
-    runs-on: ubuntu-latest
+    # Never runs for pull_request: this repo is public, and a self-hosted
+    # runner must not execute code from an untrusted external PR. Only
+    # push (already scoped above to main/develop/tags) and manual
+    # workflow_dispatch (requires collaborator write access) reach here —
+    # both are trusted-branch events, so self-hosted is safe.
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -46,7 +52,12 @@ jobs:
 
       - name: Login to Docker Hub
         uses: docker/login-action@v4
-        if: github.event_name != 'pull_request'
+        # Disabled: this fork must never publish to the official
+        # wppconnect/wppconnect-server image on Docker Hub. Re-enable only
+        # after IMAGE_NAME is changed to a Rootstack-owned namespace and
+        # DOCKERHUB_PUBLISH_ENABLED is deliberately set to 'true' as a
+        # repository variable.
+        if: vars.DOCKERHUB_PUBLISH_ENABLED == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -127,7 +138,10 @@ jobs:
           docker compose -p manager-env-ci --env-file .ci-env down -v
 
       - name: Publish verified image
-        if: github.event_name != 'pull_request'
+        # Disabled: same reasoning as "Login to Docker Hub" above — must
+        # not push to the official wppconnect/wppconnect-server image from
+        # this fork.
+        if: vars.DOCKERHUB_PUBLISH_ENABLED == 'true'
         env:
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
         shell: bash
@@ -138,7 +152,8 @@ jobs:
           done <<< "$IMAGE_TAGS"
 
       - name: Verify published image revision
-        if: github.event_name != 'pull_request'
+        # Only meaningful when the publish step above actually ran.
+        if: vars.DOCKERHUB_PUBLISH_ENABLED == 'true'
         env:
           IMAGE: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
         shell: bash

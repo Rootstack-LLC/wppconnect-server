@@ -58,8 +58,11 @@ jobs:
   lint:
     # Temporarily disabled in CI at Susan's request. The `yarn lint` script
     # and ESLint config/rules are untouched — only this job's execution is
-    # gated off. Remove this `if: false` to re-enable.
-    if: false
+    # gated off. actionlint flags a bare `if: false` as a constant
+    # condition, so this uses an undefined-by-default repository variable
+    # instead: re-enable by setting LINT_ENABLED=true as a repo variable,
+    # or just delete this `if:` line.
+    if: vars.LINT_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

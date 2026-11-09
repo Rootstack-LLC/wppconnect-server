@@ -49,6 +49,16 @@ export interface ServerOptions {
     enable: boolean;
     prefix: string;
   };
+  profileLock: {
+    enable: boolean;
+    heartbeatIntervalMs: number;
+    staleThresholdMs: number;
+    acquireTimeoutMs: number;
+    orphanKillAfterS: number;
+  };
+  shutdown: {
+    timeoutMs: number;
+  };
   db: {
     mongodbDatabase: string;
     mongodbCollection: string;

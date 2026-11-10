@@ -2,18 +2,29 @@ name: build
 
 on:
   push:
+    # '*' does not match a branch name containing '/' (GitHub's glob rules:
+    # a single '*' never crosses '/'). '**' is required so internal
+    # branches like fix/foo or ci/bar actually trigger this push build.
     branches:
-      - '*'
+      - '**'
   pull_request:
+    # This filters on the PR's base branch, not its head/source branch, so
+    # '*' here is unaffected by source branch names containing '/' — kept
+    # as '**' anyway for consistency and to avoid the same footgun if a
+    # slash-containing base branch is ever used.
     branches:
-      - '*'
+      - '**'
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Never runs for pull_request: this repo is public, and a self-hosted
+    # runner must not execute code from an untrusted external PR. Only
+    # push to an internal branch (requires write access) reaches here.
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,7 +62,9 @@ jobs:
         run: yarn test --runInBand
 
   lint:
-    runs-on: ubuntu-latest
+    # Same reasoning as build above: push-only, never pull_request.
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

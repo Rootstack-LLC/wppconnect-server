@@ -32,7 +32,10 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       !startsWith(github.event.head_commit.message, 'chore(release):')
-    runs-on: ubuntu-latest
+    # Safe on self-hosted: only push-to-main (requires write access) and
+    # manual workflow_dispatch (requires collaborator write access) trigger
+    # this job — never pull_request.
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,14 +103,24 @@ jobs:
         if: steps.release-check.outputs.should_release == 'true'
         run: yarn docs
 
+      # Disabled until explicit approval: this auto-commits to main
+      # unattended. Re-enable by setting RELEASE_PUBLISH_ENABLED=true as a
+      # repository variable once Susan/the team deliberately wants this
+      # automation live again.
       - uses: stefanzweifel/git-auto-commit-action@v5
-        if: steps.release-check.outputs.should_release == 'true'
+        if: >-
+          steps.release-check.outputs.should_release == 'true' &&
+          vars.RELEASE_PUBLISH_ENABLED == 'true'
         with:
           commit_message: 'docs: Improovment on docs'
           file_pattern: 'src/swagger.json'
           commit_user_name: github-actions[bot]
           commit_user_email: 41898282+github-actions[bot]@users.noreply.github.com
 
+      # Disabled until explicit approval: cuts a real version bump/tag/
+      # release unattended. Same RELEASE_PUBLISH_ENABLED gate as above.
       - name: Release
-        if: steps.release-check.outputs.should_release == 'true'
+        if: >-
+          steps.release-check.outputs.should_release == 'true' &&
+          vars.RELEASE_PUBLISH_ENABLED == 'true'
         run: 'npx release-it --increment ${{ steps.release-check.outputs.increment }}'

@@ -38,6 +38,9 @@ import {
   startAllSessions,
 } from './util/functions';
 import { createLogger } from './util/logger';
+import { beginShutdown } from './util/sessionMaintenance';
+import { clientsArray } from './util/sessionUtil';
+import { createShutdownHandler } from './util/shutdownManager';
 
 export const logger = createLogger(config.log);
 
@@ -128,6 +131,42 @@ export function initServer(serverOptions: Partial<ServerOptions>): {
     logger.info(`WPPConnect-Server version: ${version}`);
 
     if (serverOptions.startAllSession) startAllSessions(serverOptions, logger);
+  });
+
+  // ECS sends SIGTERM before SIGKILL on a stop/redeploy. Without this, Node's
+  // default handling never gives Chromium a chance to release its own
+  // profile lock — the container runtime kills the whole process tree once
+  // the stop timeout elapses, leaving a stale lock for the next task that
+  // mounts the same EFS-backed profile to fail on.
+  const shutdownHandler = createShutdownHandler({
+    app: {
+      close: () =>
+        new Promise<void>((resolve, reject) => {
+          http.close((error) => (error ? reject(error) : resolve()));
+        }),
+    },
+    sessionManager: {
+      list: () =>
+        Object.keys(clientsArray).map((name) => {
+          const client = clientsArray[name] as any;
+          return {
+            name,
+            adapter:
+              client && typeof client.close === 'function'
+                ? { session: { close: () => client.close() } }
+                : undefined,
+          };
+        }),
+    },
+    logger,
+    timeoutMs: (serverOptions as ServerOptions).shutdown?.timeoutMs ?? 10000,
+    beginShutdown,
+  });
+  process.once('SIGTERM', () => {
+    void shutdownHandler().finally(() => process.exit(0));
+  });
+  process.once('SIGINT', () => {
+    void shutdownHandler().finally(() => process.exit(0));
   });
 
   if (config.log.level === 'error' || config.log.level === 'warn') {

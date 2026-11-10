@@ -46,13 +46,21 @@ RUN yarn build
 FROM build AS runtime
 WORKDIR /usr/src/wpp-server/
 
-# Install runtime dependencies (chromium and vips libraries)
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Install runtime dependencies (chromium and vips libraries).
+# util-linux provides the full `flock(1)` binary sessionProfileLock.ts
+# depends on for cross-task EFS coordination — busybox's own flock applet
+# is not guaranteed present/complete on every Alpine base, so this is
+# installed explicitly rather than assumed.
 RUN apk add --no-cache \
     chromium \
     vips \
-    fftw
+    fftw \
+    util-linux
 
 EXPOSE 21465
 COPY --from=manager /manager ./manager
 ENV MANAGER_ENABLED=true
-ENTRYPOINT ["node", "dist/server.js"]
+ENTRYPOINT ["/entrypoint.sh"]

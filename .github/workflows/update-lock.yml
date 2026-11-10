@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   update-lock:
-    runs-on: ubuntu-latest
+    # Safe on self-hosted: only triggers on push to main (requires write
+    # access), never reachable from an external pull_request.
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,7 +38,11 @@ jobs:
       - name: Install Dependencies
         run: yarn install
 
+      # Disabled until explicit approval: auto-commits to main unattended.
+      # Re-enable by setting LOCKFILE_AUTOCOMMIT_ENABLED=true as a
+      # repository variable once this automation is deliberately wanted.
       - uses: stefanzweifel/git-auto-commit-action@v5
+        if: vars.LOCKFILE_AUTOCOMMIT_ENABLED == 'true'
         with:
           commit_message: 'chore: Updated yarn.lock'
           file_pattern: yarn.lock

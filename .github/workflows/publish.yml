@@ -11,7 +11,13 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # Disabled by default: cuts a real npm publish + GitHub Release
+    # unattended. Re-enable by setting NPM_PUBLISH_ENABLED=true as a
+    # repository variable once this is deliberately wanted. Safe on
+    # self-hosted regardless: this workflow only triggers on a `v*` tag
+    # push, which requires write/tag-push access — never pull_request.
+    if: vars.NPM_PUBLISH_ENABLED == 'true'
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

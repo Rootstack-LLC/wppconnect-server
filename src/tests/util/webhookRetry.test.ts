@@ -126,6 +126,46 @@ it('rejects an unconfigured session destination before making any request', asyn
   expect(req.logger.warn).toHaveBeenCalledTimes(1);
 });
 
+it('never sends a WhatsApp read receipt for a received message when readMessage is off (the default)', async () => {
+  const { client, req } = setup({ readMessage: false });
+  post.mockResolvedValue({});
+  await callWebHook(client, req as any, 'onmessage', {
+    id: 'message-id',
+    from: 'contact',
+  });
+  expect(post).toHaveBeenCalledTimes(1);
+  expect(client.sendSeen).not.toHaveBeenCalled();
+});
+
+it('never sends a WhatsApp read receipt for an unread-messages sync event when readMessage is off', async () => {
+  const { client, req } = setup({ readMessage: false });
+  post.mockResolvedValue({});
+  await callWebHook(client, req as any, 'unreadmessages', { chats: [] });
+  expect(post).toHaveBeenCalledTimes(1);
+  expect(client.sendSeen).not.toHaveBeenCalled();
+});
+
+it('still delivers the webhook notification itself when readMessage is off -- only the read receipt is skipped', async () => {
+  const { client, req } = setup({ readMessage: false });
+  post.mockResolvedValue({});
+  await callWebHook(client, req as any, 'onmessage', {
+    id: 'message-id',
+    from: 'contact',
+  });
+  expect(post).toHaveBeenCalledWith(
+    'https://example.com/hook',
+    { event: 'onmessage', session: 'test', id: 'message-id', from: 'contact' },
+    { timeout: 30000 }
+  );
+});
+
+it('never sends a read receipt for an event unrelated to messages, regardless of readMessage', async () => {
+  const { client, req } = setup({ readMessage: true });
+  post.mockResolvedValue({});
+  await callWebHook(client, req as any, 'onack', { id: 'ack-id' });
+  expect(client.sendSeen).not.toHaveBeenCalled();
+});
+
 it('permits the exact global destination or an explicitly allowed session URL', async () => {
   const { client, req } = setup({ allowedUrls: ['https://allowed.test/hook'] });
   post.mockResolvedValue({});

@@ -14,6 +14,13 @@ function envNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function envBoolean(name: string, fallback: boolean): boolean {
+  const value = env[name];
+  if (value === undefined) return fallback;
+
+  return value.toLowerCase() === 'true';
+}
+
 export default {
   secretKey: env.SECRET_KEY || 'THISISMYSECURETOKEN',
   host: env.HOST || 'http://localhost',
@@ -37,7 +44,13 @@ export default {
     // Bytes; media larger than this is not inlined as base64 (0 = no limit).
     autoDownloadMaxSize: envNumber('WEBHOOK_AUTO_DOWNLOAD_MAX_SIZE', 0),
     uploadS3: false,
-    readMessage: true,
+    // Off by default: calling client.sendSeen() for every inbound message
+    // delivered over the webhook marks the chat "seen" on WhatsApp itself,
+    // independent of whatever read-state the consuming backend keeps --
+    // there is no way for a webhook receiver to opt out per-request, only
+    // this server-wide setting. Set WEBHOOK_READ_MESSAGE=true to restore
+    // the upstream default if a deployment actually wants that behavior.
+    readMessage: envBoolean('WEBHOOK_READ_MESSAGE', false),
     allUnreadOnStart: false,
     listenAcks: true,
     onPresenceChanged: true,
